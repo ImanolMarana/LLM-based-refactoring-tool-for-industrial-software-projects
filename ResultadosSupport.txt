@@ -1,0 +1,127 @@
+```java
+  //Refactored code must maintain this order, being the refactored method at the beginning, then the other support methods. Do not include details about the main class 
+  class innerClass{
+    String innerClassParameter = "";
+  }
+  
+  public void refactoredMethod(innerClass newInputParameter){
+    String newParameter = supportMethod(newInputParameter);
+  }
+
+  private String supportMethod(String input){
+    return input;
+  }
+```
+At the beginning of the refactored code, add the following comment: //Refactoring beginning 
+Add the following comment at the end of the refactoring: //Refactoring end
+
+It is important that the lines containing the definition of the method to be refactored are exactly the same between the original and the refactored one
+
+The result should be somethin similar to the following process:
+
+  original code:
+    package examplePackage
+    
+    public class exampleClass{
+      String exampleString = "";
+      
+      exampleClass(){
+        ...
+      }
+      
+      public void methodToRefactor(
+        String inputParameter){
+        ...
+      }
+    }
+    
+    
+  refactored code:
+    ```java
+      //Refactoring beginning
+      
+      public void methodToRefactor(
+        String inputParameter){
+        ...
+      }
+      
+      private void newMethodGeneratedForRefactoring(String something){
+        ...
+      }
+      
+      //Refactoring end
+    ```
+    
+    
+    
+Here is another example of a successful refactoring: 
+
+  original code:
+    package examplePackage
+    
+    public class anotherClass{
+      String exampleString = "";
+      
+      anotherClass(){
+        ...
+      }
+      
+      public void anotherMethodToRefactor(String inputParameter)
+      {
+        ...
+      }
+    }
+    
+    
+  refactored code:
+    ```java
+      //Refactoring beginning
+      
+      public void anotherMethodToRefactor(String inputParameter)
+      {
+        ...
+      }
+      
+      private void anotherMethodGeneratedForRefactoring(String somethig){
+        ...
+      }
+      
+      //Refactoring end
+    ```
+    
+    
+    
+Here is yet another example of a successful refactoring: 
+
+  original code:
+    package examplePackage
+    
+    public class newExampleClass{
+      String exampleString = "";
+      
+      anotherClass(){
+        ...
+      }
+      
+      public void newMethodToRefactor(String inputParameter,
+      int anotherInputParameter) {
+        ...
+      }
+    }
+    
+    
+  refactored code:
+    ```java
+      //Refactoring beginning
+      
+      public void anotherMethodToRefactor(String inputParameter,
+      int anotherInputParameter){
+        ...
+      }
+      
+      private void auxiliarMethodGeneratedForRefactoring(String somethig){
+        ...
+      }
+      
+      //Refactoring end
+    ```
