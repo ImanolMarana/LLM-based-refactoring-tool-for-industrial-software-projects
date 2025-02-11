@@ -7,197 +7,224 @@ import os
 import pathlib
 import textwrap
 import google.generativeai as genai
+import anthropic
+import time
 from dotenv import load_dotenv
 from IPython.display import display
 from IPython.display import Markdown
-from jproperties import Properties
 
+from fileManagement import getFileLocation, loadProperties, loadJavaFile, loadOtherFile, writeFile
 from methodRefactoring import refactorMethod
 
 
-def loadProperties():
-  configs = Properties()
-  with open('config_file.properties', 'rb') as config_file:
-    configs.load(config_file)
-  return configs
 
-
-def loadFile(path):
-  start = False
-  comment = False
-  skippedLines = 0
-  skippedCode = ""
-  lines = ""
-  try:
-    with open(path, "r") as file:
-      for line in file:
-        if(start):    
-          lines += f"{line}"
-        else:
-          skippedLines = skippedLines + 1
-          if(comment and ('*/' in line)):
-            skippedCode += f"{line}"
-            comment = False
-          elif('/*' in line):
-            skippedCode += f"{line}"
-            comment = True
-          elif("package" in line):
-            start = True
-            lines += f"{line}"
-            skippedLines = skippedLines - 1
-          else:
-            skippedCode += f"{line}"
-    return [lines, skippedLines, skippedCode]
-  except:
-    return ['-1', 0, ""]
-  
-def writeFile(path, code):
-  f = open(path, "w")
-  f.write(code)
-  f.close()
-
-
-def getFileLocation(issue_file_location):
-  if(properties.get("forcedFile").data == "True"):
-    return properties.get("forcedFileRoot").data
+def getSonarKey(local, properties):
+  if(local):
+    key = properties.get("sonarKey").data
   else:
-    return issue_file_location
+    key = os.environ.get("SONAR_API_TOKEN")
+  
+  return key
 
 
-def setLLM(model):
-  match model:
+
+def getLLMKey(local, properties):
+  if(local == "True"):
+    key =  properties.get("llmKey").data
+  else:
+    key =  os.environ.get("LLM_KEY")
+  
+  return key
+
+
+
+def setLLM(local, properties, modelName):
+  llmKey = getLLMKey(local, properties)
+  
+  match modelName:
     case "gemini":
-      GOOGLE_API_KEY = os.environ.get("GEMINI_MODEL_KEY")
+      GOOGLE_API_KEY = llmKey 
       genai.configure(api_key=GOOGLE_API_KEY)
       model = genai.GenerativeModel('gemini-1.5-pro-latest')
     case "GPT-4":
       model = llm.get_model("gpt-4")
-      model.key = os.environ.get("LLM_GPT4_MODEL_KEY")
+      model.key = llmKey
     case "GPT-4-turbo":
       model = llm.get_model("gpt-4-turbo")
-      model.key = os.environ.get("LLM_GPT4_MODEL_KEY")
+      model.key = llmKey
+    case "claude":
+      model_aux = anthropic.Anthropic(
+        api_key=llmKey,
+      )
+      model = [model_aux, "claude-3-5-sonnet-20241022"]
+    case default:
+      print(modelName)
+      
   return model
   
-def getIssueType(issue_message):
-  ret = ""
   
+  
+def getIssueType(issue_message):  
   if("Cognitive Complexity" in issue_message):
-    ret = "cog"
-  elif ("Cyclomatic Complexity" in issue_message):
-    ret = "method"
-  elif (("This method has" in issue_message) and ("lines, which is greater than the" in issue_message) and ("lines authorized. Split it into smaller methods." in issue_message)):
     ret = "method"
   else:
     ret = "other"
     
   return ret
-
-
-
-load_dotenv("properties.env")
-
-properties = loadProperties()
-
-# Set your SonarCloud API token and project key
-api_token = os.environ.get("SONAR_API_TOKEN")
-
-# Set the LLM model and API key
-modelType = "gemini"
-model = setLLM(modelType)
-
-# Throttle limit variables
-sleep_time = 40
-
-for project_key in properties.get("argoProjectKey").data.split(', '):
-
-  print("{}{}{}{}{}{}{}")
-  print(f"Proyecto actual: {project_key}")
-  print("{}{}{}{}{}{}{}")
   
-  sonar_project = project_key.split('_')[1]
-  
-  salir = False
-  pagina = 1
-  now = 0
-  
-  i = 0
-  
-  methodAux = 0
-  
-  failedAttempts1 = 0
-  failedAttempts2 = 0
-  failedAttempts3 = 0
-  failedAttempts4 = 0  
-  success = 0
 
-  # Make a GET request to the SonarCloud API to retrieve issues
-  while(salir == False):
-    sonar_request = f"https://sonarcloud.io/api/issues/search?componentKeys={project_key}&languages=java&tags=brain-overload&ps=100&p={pagina}&token={api_token}"
-    sonar_response = requests.get(sonar_request)
-    
-    # Parse the JSON response
-    issues = json.loads(sonar_response.text)["issues"]
-    total = json.loads(sonar_response.text)["total"]
-    if(total > 100):
-      now = pagina*100
-      if(total <= now):
-        salir = True
-    else:
-      salir = True
-    pagina = pagina+1
-    
-    # Iterate over the issues and generate refactored code
-    for issue in issues:
-        # Get the issue key, line number and refactoring message
-        issue_message = issue["message"]
-        i = i + 1
-        
-        issue_type = getIssueType(issue_message)
-    
-        if(issue_type == "cog"):
-          issue_location = issue['component'].split(':')[1]
-          original_issue_line = issue["line"]
-          issue_file_location = f"{sonar_project}/{issue_location}"
-          
-          file_location = getFileLocation(issue_file_location)
-          refactoring_file_location = f"refactoredProjects/{file_location}"
-          original_file_location = f"originalProjects/{file_location}"
-          database_location = f"resultsDatabases/{file_location}"
-          
-          # Extract the code from the file that is going to be refactored and number the lines for the future prompts
-          [code, skippedLines, skippedCode] = loadFile(original_file_location)          
-          
-          # Get the code snippet
-          if((code != '-1') and (len(code) < 60000)): 
-            methodAux = methodAux + 1 
-            #print(f"Detected issue {i}: {issue}.")
-            print(f"Detected issue {i}")    
-            print(f"Issue message: {issue_message}")  
-            print(f"Issue line: {original_issue_line}")
-            print(f"Skipped lines: {skippedLines}")
-            
-            refactoredFile = refactorMethod(code, issue, skippedLines, skippedCode, sonar_project, model, modelType, sleep_time)
-            
-            if(refactoredFile == '-1'):
-              failedAttempts1 = failedAttempts1 + 1
-            elif(refactoredFile == '-2'):
-              failedAttempts2 = failedAttempts2 + 1
-            elif(refactoredFile == '-3'):
-              failedAttempts3 = failedAttempts3 + 1
-            elif(refactoredFile == '-4'):
-              failedAttempts4 = failedAttempts4 + 1
-            else:
-              success = success + 1
-              writeFile(refactoring_file_location, refactoredFile)
-            
+
+def printTotalResults(failed1, failed2, failed3, failed4, success):
   print(f"---------------------------------------------------------------------------------")
-  print(f"Numbering lines errors: {failedAttempts1}")
-  print(f"LLM errors: {failedAttempts2}")
-  print(f"Formating errors: {failedAttempts3}")
-  print(f"Applying errors: {failedAttempts4}")
+  print(f"LLMs lines errors: {failed1}")
+  print(f"Formating errors: {failed2}")
+  print(f"Applying errors: {failed3}")
+  print(f"DB errors: {failed4}")
   print(f"---------------------------------------------------------------------------------")
   print(f"Successes: {success}")
-  print(methodAux)
-  print(i)
+  
+  
+  
+def processIssues(issue, sonar_project, properties, model, model_type, sleep_time):
+  # Get the issue key, line number and refactoring message
+  issue_message = issue["message"]
+  
+  issue_type = getIssueType(issue_message)
+
+  # match issue_type:
+  #   case "cog":
+  if("Cognitive Complexity" in issue_message):
+    issue_line = issue["line"]
+    #issue_line = issue["textRange"]["startLine"]
+    issue_location = issue['component'].split(':')[1]
+    issue_file_location = f"{sonar_project}/{issue_location}"
+    
+    input_path = properties.get("inputPath").data
+    output_path = properties.get("outputPath").data
+    db_path = properties.get("dbPath").data
+    
+    file_location = getFileLocation(properties, issue_file_location)
+    original_file_location = f"{input_path}/{file_location}"
+    refactoring_file_location = f"{output_path}/{file_location}"
+    database_location = f"{db_path}/{file_location}"
+    
+    # Extract the code from the file that is going to be refactored and number the lines for the future prompts
+    [code, skipped_lines, skipped_code] = loadJavaFile(original_file_location)
+    #[code, skipped_lines, skipped_code] = loadOtherFile(original_file_location)
+    
+    # Get the code snippet
+    if((code != '-1') and (len(code) < 60000)):
+      #print(f"Detected issue: {issue}.")    
+      print(f"Issue message: {issue_message}")  
+      print(f"Issue line: {issue_line}")
+      print(f"Skipped lines: {skipped_lines}")
+      
+      [code, refactored_file] = refactorMethod(code, issue, skipped_lines, skipped_code, sonar_project, model, model_type, sleep_time)
+      if(code == 0):
+        writeFile(refactoring_file_location, refactored_file)
+        
+    else:
+      code = 1
+      
+  else:
+    code = 2
+  
+  # Result code meaning:
+  # Code -4 means database error \
+  # Code -3 means refactoring application error \
+  # Code -2 means response formating error \
+  # Code -1 means LLM error \
+  # Code 0 means success \
+  # Code 1 means that the refactoring was the aimed issue but not processed \
+  # Code 2 means that the file was not processed  
+  return code
 
 
+def main():
+  load_dotenv("properties.env")
+  
+  properties = loadProperties()
+  
+  # Set your SonarCloud API token and project key
+  local_sonar_api_key = properties.get("sonarLocalKey").data
+  api_token = getSonarKey(local_sonar_api_key, properties)
+  
+  projects_to_analyse = properties.get("projectKeysToUse").data
+  project_keys = properties.get(projects_to_analyse).data.split(', ')
+  
+  # Set the LLM model and API key
+  local_llm_key = properties.get("llmLocalKey").data
+  model_type = properties.get("llm").data
+  model = setLLM(local_llm_key, properties, model_type)
+  
+  sleep_time = properties.get("sleepTime").data
+  
+  start = time.time()
+  
+  print(model)
+  
+  for project_key in project_keys:
+  
+    print("{}{}{}{}{}{}{}")
+    print(f"Proyecto actual: {project_key}")
+    print("{}{}{}{}{}{}{}")
+    
+    sonar_project = project_key.split('_')[1]
+    
+    salir = False
+    pagina = 1
+    now = 0
+    
+    
+    failed_attempts1 = 0
+    failed_attempts2 = 0
+    failed_attempts3 = 0
+    failed_attempts4 = 0  
+    success = 0
+  
+    # Make a GET request to the SonarCloud API to retrieve issues
+    tags = properties.get("issueTags").data.strip()
+    language = properties.get("language").data.strip()
+    print(f"Processing issues - tag: {tags}")
+    while(salir == False):
+      sonar_request = f"https://sonarcloud.io/api/issues/search?componentKeys={project_key}&languages={language}&tags={tags}&ps=100&p={pagina}&token={api_token}"
+      sonar_response = requests.get(sonar_request)
+      
+      # Parse the JSON response
+      issues = json.loads(sonar_response.text)["issues"]
+      total = json.loads(sonar_response.text)["total"]
+      if(total > 100):
+        now = pagina*100
+        if(total <= now):
+          salir = True
+      else:
+        salir = True
+      pagina = pagina+1
+      
+      print(len(issues))
+      
+      # Iterate over the issues and generate refactored code
+      for issue in issues:
+        result = processIssues(issue, sonar_project, properties, model, model_type, sleep_time)
+      
+        match result:
+          case -4:
+            failed_attempts4 = failed_attempts4 + 1  
+          case -3:
+            failed_attempts3 = failed_attempts3 + 1
+          case -2:
+            failed_attempts2 = failed_attempts2 + 1
+          case -1:  
+            failed_attempts1 = failed_attempts1 + 1
+          case 0:
+            success = success + 1
+              
+    
+    printTotalResults(failed_attempts1, failed_attempts2, failed_attempts3, failed_attempts4, success)
+    end = time.time()
+    total_time = int(end - start)
+    print(f"Tiempo de ejecucion = {total_time}")        
+  
+  
+  
+main()
